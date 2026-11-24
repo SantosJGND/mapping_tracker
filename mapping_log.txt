@@ -1,0 +1,105 @@
+2026-11-23 11:47:52,859 - INFO - Starting mapping pipeline
+2026-11-23 11:47:52,859 - INFO - Checking dependencies (aligner=bwa)...
+2026-11-23 11:47:52,859 - INFO -   All required tools found.
+2026-11-23 11:47:52,859 - INFO - Trimming reads (LEADING:3 TRAILING:3 SLIDINGWINDOW:5:20 MINLEN:36, phred33)
+2026-11-23 11:47:52,859 - INFO - Filtering alignments (min_len=100, min_identity=98%, min_query_aligned=50%)
+2026-11-23 11:47:52,859 - INFO - Prefiltering reads (min_entropy=0.5, min_dust=0.5, gzip=False)
+2026-11-23 11:47:52,859 - INFO - Removing duplicates (MarkDuplicates, heap=8g)
+2026-11-23 11:47:52,859 - INFO - Finding references...
+2026-11-23 11:47:52,860 - INFO - Found 6 reference genomes:
+2026-11-23 11:47:52,860 - INFO -   - Bradyrhizobium_centrosematis (GCF_045571495.1)
+2026-11-23 11:47:52,860 - INFO -   - Herbaspirillum_huttiense (GCF_004367745.1)
+2026-11-23 11:47:52,860 - INFO -   - Micrococcus_luteus (GCF_013426035.1)
+2026-11-23 11:47:52,860 - INFO -   - Sphingomonas_paucimobilis (GCF_016027095.1)
+2026-11-23 11:47:52,860 - INFO -   - micobacter_cheolonae (GCF_001632805.1)
+2026-11-23 11:47:52,860 - INFO -   - nocardia_gipuzkoensis (GCF_021183645.1)
+2026-11-23 11:47:52,860 - INFO - Finding samples...
+2026-11-23 11:47:52,870 - INFO - Found 7 samples:
+2026-11-23 11:47:52,870 - INFO -   - CN-20261117-RU-2026 (paired-end)
+2026-11-23 11:47:52,870 - INFO -   - CNa-RU-2026 (paired-end)
+2026-11-23 11:47:52,870 - INFO -   - CNb-RU-2026 (paired-end)
+2026-11-23 11:47:52,870 - INFO -   - Met-0361-RU-2026-REP (paired-end)
+2026-11-23 11:47:52,870 - INFO -   - Met-0385-RU-2026 (paired-end)
+2026-11-23 11:47:52,870 - INFO -   - Met-0388-RU-2026 (paired-end)
+2026-11-23 11:47:52,870 - INFO -   - Met-0389-RU-2026 (paired-end)
+2026-11-23 11:47:52,870 - INFO - Validating references...
+2026-11-23 11:47:52,958 - INFO -   All reference files valid.
+2026-11-23 11:47:52,958 - INFO - Validating samples...
+2026-11-23 11:47:52,958 - INFO -   All sample files valid.
+2026-11-23 11:47:52,959 - INFO - Using temp directory: /tmp/index_bwa_wcxkj9o9
+2026-11-23 11:47:52,959 - INFO - Threads per combination: 5
+2026-11-23 11:47:52,959 - INFO - Building bwa indexes...
+2026-11-23 11:47:55,654 - INFO -   Indexed: Bradyrhizobium_centrosematis (GCF_045571495.1)
+2026-11-23 11:47:57,438 - INFO -   Indexed: Herbaspirillum_huttiense (GCF_004367745.1)
+2026-11-23 11:47:58,099 - INFO -   Indexed: Micrococcus_luteus (GCF_013426035.1)
+2026-11-23 11:47:59,387 - INFO -   Indexed: Sphingomonas_paucimobilis (GCF_016027095.1)
+2026-11-23 11:48:00,884 - INFO -   Indexed: micobacter_cheolonae (GCF_001632805.1)
+2026-11-23 11:48:03,552 - INFO -   Indexed: nocardia_gipuzkoensis (GCF_021183645.1)
+2026-11-23 11:48:03,552 - INFO - Processing 42 sample × reference combinations...
+2026-11-23 11:48:03,553 - INFO - Trimming reads with Trimmomatic...
+2026-11-23 11:48:05,887 - INFO -   CNa-RU-2026: 269792 input reads -> 269726 passed trimming (66 removed)
+2026-11-23 11:48:08,127 - INFO -   CNb-RU-2026: 851502 input reads -> 851200 passed trimming (302 removed)
+2026-11-23 11:48:09,135 - INFO -   CN-20261117-RU-2026: 1229550 input reads -> 1229153 passed trimming (397 removed)
+2026-11-23 11:48:10,617 - INFO -   Met-0361-RU-2026-REP: 1287716 input reads -> 1285897 passed trimming (1819 removed)
+2026-11-23 11:48:11,927 - INFO -   Met-0389-RU-2026: 596620 input reads -> 596034 passed trimming (586 removed)
+2026-11-23 11:48:12,028 - INFO -   Met-0385-RU-2026: 1528666 input reads -> 1523674 passed trimming (4992 removed)
+2026-11-23 11:48:12,736 - INFO -   Met-0388-RU-2026: 1156022 input reads -> 1154082 passed trimming (1940 removed)
+2026-11-23 11:48:12,736 - INFO - Prefiltering reads with prinseq++ (entropy/dust)...
+2026-11-23 11:48:19,460 - INFO -   CNa-RU-2026: 269726 input reads -> 269081 passed prefilter (645 removed)
+2026-11-23 11:48:33,857 - INFO -   CNb-RU-2026: 851200 input reads -> 850977 passed prefilter (223 removed)
+2026-11-23 11:48:33,892 - INFO -   Met-0389-RU-2026: 596034 input reads -> 594173 passed prefilter (1861 removed)
+2026-11-23 11:48:38,657 - INFO -   CN-20261117-RU-2026: 1229153 input reads -> 1228735 passed prefilter (418 removed)
+2026-11-23 11:48:41,876 - INFO -   Met-0361-RU-2026-REP: 1285897 input reads -> 1282138 passed prefilter (3759 removed)
+2026-11-23 11:48:53,352 - INFO -   Met-0388-RU-2026: 1154082 input reads -> 1149865 passed prefilter (4217 removed)
+2026-11-23 11:48:55,383 - INFO -   Met-0385-RU-2026: 1523674 input reads -> 1517247 passed prefilter (6427 removed)
+2026-11-23 11:49:11,355 - INFO - [1/42] CNa-RU-2026 vs Bradyrhizobium_centrosematis: DONE (duplicates removed: 178850)
+2026-11-23 11:49:12,815 - INFO - [2/42] CNa-RU-2026 vs Micrococcus_luteus: DONE (duplicates removed: 235025)
+2026-11-23 11:49:13,162 - INFO - [3/42] CNa-RU-2026 vs Sphingomonas_paucimobilis: DONE (duplicates removed: 171648)
+2026-11-23 11:49:15,193 - INFO - [4/42] CNa-RU-2026 vs Herbaspirillum_huttiense: DONE (duplicates removed: 191102)
+2026-11-23 11:49:26,240 - INFO - [5/42] CNa-RU-2026 vs micobacter_cheolonae: DONE (duplicates removed: 240043)
+2026-11-23 11:49:32,360 - INFO - [6/42] CNa-RU-2026 vs nocardia_gipuzkoensis: DONE (duplicates removed: 230857)
+2026-11-23 11:49:47,329 - INFO - [7/42] CNb-RU-2026 vs Bradyrhizobium_centrosematis: DONE (duplicates removed: 522547)
+2026-11-23 11:50:00,781 - INFO - [8/42] CNb-RU-2026 vs Herbaspirillum_huttiense: DONE (duplicates removed: 514667)
+2026-11-23 11:50:04,391 - INFO - [9/42] CNb-RU-2026 vs Micrococcus_luteus: DONE (duplicates removed: 625250)
+2026-11-23 11:50:11,416 - INFO - [10/42] CNb-RU-2026 vs Sphingomonas_paucimobilis: DONE (duplicates removed: 482534)
+2026-11-23 11:50:18,116 - INFO - [11/42] CNb-RU-2026 vs micobacter_cheolonae: DONE (duplicates removed: 640540)
+2026-11-23 11:50:27,270 - INFO - [12/42] Met-0389-RU-2026 vs Bradyrhizobium_centrosematis: DONE (duplicates removed: 17265)
+2026-11-23 11:50:34,283 - INFO - [13/42] Met-0389-RU-2026 vs Herbaspirillum_huttiense: DONE (duplicates removed: 9839)
+2026-11-23 11:50:39,885 - INFO - [14/42] Met-0389-RU-2026 vs Micrococcus_luteus: DONE (duplicates removed: 26182)
+2026-11-23 11:50:42,608 - INFO - [15/42] CNb-RU-2026 vs nocardia_gipuzkoensis: DONE (duplicates removed: 627408)
+2026-11-23 11:50:49,438 - INFO - [16/42] Met-0389-RU-2026 vs Sphingomonas_paucimobilis: DONE (duplicates removed: 10582)
+2026-11-23 11:50:57,176 - INFO - [17/42] Met-0389-RU-2026 vs micobacter_cheolonae: DONE (duplicates removed: 32370)
+2026-11-23 11:51:03,037 - INFO - [18/42] Met-0389-RU-2026 vs nocardia_gipuzkoensis: DONE (duplicates removed: 24856)
+2026-11-23 11:51:23,552 - INFO - [19/42] CN-20261117-RU-2026 vs Bradyrhizobium_centrosematis: DONE (duplicates removed: 837328)
+2026-11-23 11:51:42,816 - INFO - [20/42] CN-20261117-RU-2026 vs Micrococcus_luteus: DONE (duplicates removed: 1122889)
+2026-11-23 11:51:46,895 - INFO - [21/42] CN-20261117-RU-2026 vs Herbaspirillum_huttiense: DONE (duplicates removed: 842899)
+2026-11-23 11:51:52,858 - INFO - [22/42] CN-20261117-RU-2026 vs Sphingomonas_paucimobilis: DONE (duplicates removed: 727331)
+2026-11-23 11:52:00,816 - INFO - [23/42] CN-20261117-RU-2026 vs micobacter_cheolonae: DONE (duplicates removed: 1142918)
+2026-11-23 11:52:34,945 - INFO - [24/42] Met-0361-RU-2026-REP vs Bradyrhizobium_centrosematis: DONE (duplicates removed: 40665)
+2026-11-23 11:52:38,125 - INFO - [25/42] Met-0361-RU-2026-REP vs Herbaspirillum_huttiense: DONE (duplicates removed: 29187)
+2026-11-23 11:52:42,912 - INFO - [26/42] Met-0361-RU-2026-REP vs Micrococcus_luteus: DONE (duplicates removed: 38017)
+2026-11-23 11:52:45,241 - INFO - [27/42] CN-20261117-RU-2026 vs nocardia_gipuzkoensis: DONE (duplicates removed: 1088851)
+2026-11-23 11:53:18,693 - INFO - [28/42] Met-0361-RU-2026-REP vs Sphingomonas_paucimobilis: DONE (duplicates removed: 30636)
+2026-11-23 11:53:20,147 - INFO - [29/42] Met-0361-RU-2026-REP vs micobacter_cheolonae: DONE (duplicates removed: 41859)
+2026-11-23 11:53:25,032 - INFO - [30/42] Met-0388-RU-2026 vs Bradyrhizobium_centrosematis: DONE (duplicates removed: 3470)
+2026-11-23 11:53:26,804 - INFO - [31/42] Met-0361-RU-2026-REP vs nocardia_gipuzkoensis: DONE (duplicates removed: 35573)
+2026-11-23 11:53:56,015 - INFO - [32/42] Met-0388-RU-2026 vs Micrococcus_luteus: DONE (duplicates removed: 3570)
+2026-11-23 11:53:56,022 - INFO - [33/42] Met-0388-RU-2026 vs Herbaspirillum_huttiense: DONE (duplicates removed: 340)
+2026-11-23 11:54:01,457 - INFO - [34/42] Met-0388-RU-2026 vs Sphingomonas_paucimobilis: DONE (duplicates removed: 2252)
+2026-11-23 11:54:02,814 - INFO - [35/42] Met-0388-RU-2026 vs micobacter_cheolonae: DONE (duplicates removed: 3088)
+2026-11-23 11:54:39,655 - INFO - [36/42] Met-0388-RU-2026 vs nocardia_gipuzkoensis: DONE (duplicates removed: 3608)
+2026-11-23 11:54:42,093 - INFO - [37/42] Met-0385-RU-2026 vs Bradyrhizobium_centrosematis: DONE (duplicates removed: 242127)
+2026-11-23 11:54:50,624 - INFO - [38/42] Met-0385-RU-2026 vs Micrococcus_luteus: DONE (duplicates removed: 300451)
+2026-11-23 11:54:54,344 - INFO - [39/42] Met-0385-RU-2026 vs Herbaspirillum_huttiense: DONE (duplicates removed: 243704)
+2026-11-23 11:55:23,674 - INFO - [40/42] Met-0385-RU-2026 vs micobacter_cheolonae: DONE (duplicates removed: 302939)
+2026-11-23 11:55:24,091 - INFO - [41/42] Met-0385-RU-2026 vs Sphingomonas_paucimobilis: DONE (duplicates removed: 229370)
+2026-11-23 11:55:31,526 - INFO - [42/42] Met-0385-RU-2026 vs nocardia_gipuzkoensis: DONE (duplicates removed: 296088)
+2026-11-23 11:55:31,530 - INFO - Collecting statistics...
+2026-11-23 11:55:31,545 - INFO - Results saved to: /home/bioinf/Desktop/INSA/DDI/METAGENOMICS/reports/Panel-RU-3644337-529066544/data/mapping_results.tsv
+2026-11-23 11:55:31,545 - INFO - BAM files saved to: /home/bioinf/Desktop/INSA/DDI/METAGENOMICS/reports/Panel-RU-3644337-529066544/data/mappings
+2026-11-23 11:55:31,545 - INFO - === Summary ===
+2026-11-23 11:55:31,546 - INFO - Total combinations: 42
+2026-11-23 11:55:31,546 - INFO - Successful mappings: 42
+2026-11-23 11:55:31,546 - INFO - Resumed from existing BAMs (skipped): 0
+2026-11-23 11:55:31,559 - INFO - Temp directory cleaned up: /tmp/index_bwa_wcxkj9o9
+2026-11-23 11:55:31,559 - INFO - Pipeline completed
