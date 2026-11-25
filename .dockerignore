@@ -1,0 +1,9 @@
+.git/
+.agents/
+.claude/
+data/
+images/
+app/cache/
+mapping_log.txt
+**/__pycache__/
+**/*.py[cod]

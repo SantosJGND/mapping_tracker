@@ -9,11 +9,13 @@ RUN micromamba create -y -p /opt/conda/envs/bio \
       trimmomatic=0.39 picard=3.5.0 msamtools=1.1.3 \
       prinseq-plus-plus=1.2.4 nanofilt=2.8.0 \
     && micromamba create -y -p /opt/conda/envs/app \
-      -c conda-forge python=3.11 pip \
+      -c conda-forge python=3.11 pip git \
     && micromamba clean -afy
 
-COPY mapping_tracker/ /app/mapping_tracker/
-COPY mapped_reference_extract/extract_remap.py /app/mapped_reference_extract/extract_remap.py
+RUN /opt/conda/envs/app/bin/git clone --depth 1 --branch main \
+      https://github.com/SantosJGND/excise_remap.git /app/mapped_reference_extract
+
+COPY . /app/mapping_tracker/
 
 WORKDIR /app/mapping_tracker
 

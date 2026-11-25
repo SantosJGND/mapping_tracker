@@ -289,13 +289,17 @@ The flagging was also checked with `bwa mem` alignments: reads simulated from th
 
 ## Docker
 
-Build from the parent `TOOLS` directory so the sibling `extract_remap.py` is included:
+Build from the `mapping_tracker/` directory; no parent directory is needed. The build context is this directory (`.dockerignore` excludes caches, `.git`, and `data/`). `extract_remap.py` is not taken from a local checkout: the build clones [`excise_remap`](https://github.com/SantosJGND/excise_remap) (branch `main`) into `/app/mapped_reference_extract`, so the build needs network access to GitHub:
 
 ```bash
-cd /home/bioinf/Desktop/CODE/INSA/TOOLS
+cd mapping_tracker
 mkdir -p data/references data/samples data/output data/cache
-docker compose -f mapping_tracker/docker-compose.yml up --build
+docker compose up --build
 ```
+
+Host data goes in `./data/` by default (`references`, `samples`, `output`, `cache`). Override with `REFS_DIR`, `SAMPLES_DIR`, `OUTPUT_DIR`, and `CACHE_DIR`.
+
+Plain `docker build -t mapping-tracker:local .` also works from this directory.
 
 Open `http://localhost:8501`. The compose file uses host networking, which is required because the Browser tab's igv.js range server binds `127.0.0.1` on a random port; only a browser on the same machine can use it. Set `UID`/`GID` if the host user is not `1000:1000`, and point `REFS_DIR`, `SAMPLES_DIR`, `OUTPUT_DIR`, and `CACHE_DIR` at writable host directories.
 
@@ -307,4 +311,4 @@ Use these paths in the Streamlit sidebar:
 - statistics TSV: `/app/mapping_tracker/mapping_results/mapping_statistics.tsv`
 - log file: `/app/mapping_tracker/mapping_results/mapping_log.txt`
 
-The image contains all pipeline tools and the default `extract_remap.py` path. Override tool locations with the `MAPPING_*` environment variables (for example `MAPPING_DEDUP_HEAP=4g`).
+The image contains all pipeline tools and the default `extract_remap.py` path (`/app/mapped_reference_extract/extract_remap.py`, cloned from GitHub at build time). Override tool locations with the `MAPPING_*` environment variables (for example `MAPPING_DEDUP_HEAP=4g`).
