@@ -8,8 +8,6 @@ services:
     user: "${UID:-1000}:${GID:-1000}"
     environment:
       MAPPING_DEDUP_HEAP: "${MAPPING_DEDUP_HEAP:-8g}"
+      TMPDIR: /app/mapping_tracker/data/tmp
     volumes:
-      - ${REFS_DIR:-./data/references}:/app/mapping_tracker/references:ro
-      - ${SAMPLES_DIR:-./data/samples}:/app/mapping_tracker/samples:ro
-      - ${OUTPUT_DIR:-./data/output}:/app/mapping_tracker/mapping_results
-      - ${CACHE_DIR:-./data/cache}:/app/mapping_tracker/app/cache
+      - ${DATA_DIR:-./data}:/app/mapping_tracker/data

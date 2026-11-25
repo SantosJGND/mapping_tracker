@@ -22,12 +22,15 @@ WORKDIR /app/mapping_tracker
 RUN /opt/conda/envs/app/bin/python -m pip install --no-cache-dir -r requirements.txt \
     && mkdir -p /home/mapping \
       /app/mapping_tracker/app/cache/browser \
+      /app/mapping_tracker/data/runs \
+      /app/mapping_tracker/data/tmp \
       /app/mapping_tracker/mapping_results \
       /app/mapping_tracker/references \
       /app/mapping_tracker/samples \
       /data \
     && chown -R 1000:1000 /home/mapping \
       /app/mapping_tracker/app/cache \
+      /app/mapping_tracker/data \
       /app/mapping_tracker/mapping_results \
       /app/mapping_tracker/references \
       /app/mapping_tracker/samples \

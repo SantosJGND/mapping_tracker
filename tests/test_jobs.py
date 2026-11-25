@@ -17,6 +17,7 @@ from pathlib import Path
 APP = Path(__file__).resolve().parent.parent / "app"
 sys.path.insert(0, str(APP))
 import jobs  # noqa: E402
+import runs  # noqa: E402
 
 RUNNER = APP / "pipeline_runner.py"
 
@@ -42,6 +43,10 @@ open(os.path.join(outdir, 'subset_ref.fa.fai'), 'w').write('c\\t10\\t0\\t10\\t11
 class JobsTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="jobs_test_")
+        self.old_data_dir = runs.DATA_DIR
+        self.old_data_env = os.environ.get("MAPPING_TRACKER_DATA_DIR")
+        runs.DATA_DIR = os.path.join(self.tmp, "data")
+        os.environ["MAPPING_TRACKER_DATA_DIR"] = str(runs.DATA_DIR)
         self.samples = os.path.join(self.tmp, "samples")
         self.out = os.path.join(self.tmp, "out")
         os.makedirs(self.samples)
@@ -50,6 +55,11 @@ class JobsTestCase(unittest.TestCase):
         os.makedirs(self.out)
 
     def tearDown(self):
+        runs.DATA_DIR = self.old_data_dir
+        if self.old_data_env is None:
+            os.environ.pop("MAPPING_TRACKER_DATA_DIR", None)
+        else:
+            os.environ["MAPPING_TRACKER_DATA_DIR"] = self.old_data_env
         shutil.rmtree(self.tmp, ignore_errors=True)
 
 
@@ -120,6 +130,28 @@ class JobStateTests(JobsTestCase):
         self.assertFalse(jobs.job_active(self.out))
 
 
+class GlobalLockTests(JobsTestCase):
+    def test_start_refuses_when_another_run_is_active(self):
+        run = runs.create_run("locked")
+        runs.acquire_lock(run["run_id"])
+        spec = {"pathogen": "P", "assembly_id": "A"}
+        try:
+            with self.assertRaises(RuntimeError):
+                jobs.start_job(spec, self.out)
+        finally:
+            runs.release_lock(run["run_id"])
+
+    def test_start_refuses_when_lock_is_held(self):
+        run = runs.create_run("locked")
+        runs.acquire_lock(run["run_id"])
+        spec = {"pathogen": "P", "assembly_id": "A"}
+        try:
+            with self.assertRaises(RuntimeError):
+                jobs.start_job(spec, self.out, run_id=runs.create_run("other")["run_id"])
+        finally:
+            runs.release_lock(run["run_id"])
+
+
 class CancelTests(JobsTestCase):
     def test_cancel_stops_job_and_children(self):
         sleeper = os.path.join(self.tmp, "sleeper.py")
@@ -188,6 +220,18 @@ class RunnerTests(JobsTestCase):
         self.assertIn("--manifest", calls[1])
         registered = jobs.read_registered(jobs.extract_dir(self.out, "PathoA"))
         self.assertEqual([r["name"] for r in registered], ["s1"])
+
+    def test_success_releases_run_lock_and_updates_run(self):
+        m, e = self._write_stubs()
+        run = runs.create_run("run with lock")
+        run_id = run["run_id"]
+        self.assertEqual(runs.acquire_lock(run_id), run_id)
+        jobs.write_job(self.out, {"run_id": run_id})
+        spec_path, log = self._spec(m, e, run_id=run_id)
+        rc = subprocess.run([sys.executable, str(RUNNER), spec_path]).returncode
+        self.assertEqual(rc, 0)
+        self.assertIsNone(runs.active_run())
+        self.assertEqual(runs.read_run(run_id)["status"], "done")
 
     def test_mapping_failure_skips_extract(self):
         m, e = self._write_stubs()

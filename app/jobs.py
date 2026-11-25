@@ -28,6 +28,7 @@ if _PARENT not in sys.path:
     sys.path.insert(0, _PARENT)
 
 from map_references import find_samples  # noqa: E402
+import runs  # noqa: E402
 
 DEFAULT_MAP_SCRIPT = APP_DIR.parent / "map_references.py"
 DEFAULT_EXTRACT_SCRIPT = APP_DIR.parent.parent / "mapped_reference_extract" / "extract_remap.py"
@@ -137,6 +138,13 @@ def write_job(output_dir: str, data: dict) -> None:
     with open(tmp, "w") as fh:
         json.dump(data, fh, indent=2)
     os.replace(tmp, path)
+    run_id = data.get("run_id")
+    if run_id:
+        keys = ("status", "stage", "pid", "started", "finished", "pathogen",
+                "assembly_id", "extract_dir", "samples", "manifest", "returncode",
+                "error")
+        fields = {key: data[key] for key in keys if key in data}
+        runs.update_run(run_id, **fields)
 
 
 def update_job(output_dir: str, **fields) -> None:
@@ -193,33 +201,47 @@ def cancel_job(output_dir: str) -> bool:
         os.killpg(job["pid"], signal.SIGTERM)
     except ProcessLookupError:
         pass
+    if job.get("run_id"):
+        runs.release_lock(job["run_id"])
     return True
 
 
-def start_job(spec: dict, output_dir: str) -> int:
+def start_job(spec: dict, output_dir: str, run_id: Optional[str] = None) -> int:
     """Start a detached pipeline job. Returns the runner pid.
 
     spec keys: map_cmd, extract_script, ref_fasta, samples_dir, pathogen,
     assembly_id, threads. Raises RuntimeError when a job is already running.
     """
     output_dir = os.path.abspath(output_dir)
+    active = runs.active_run()
+    if active:
+        raise RuntimeError(f"a job is already running in run {active}")
     if job_active(output_dir):
         raise RuntimeError(f"a job is already running in {output_dir}")
-    os.makedirs(output_dir, exist_ok=True)
-    spec = dict(spec, output_dir=output_dir,
-                extract_dir=extract_dir(output_dir, spec["pathogen"]))
-    spec_path = os.path.join(output_dir, SPEC_FILE)
-    with open(spec_path, "w") as fh:
-        json.dump(spec, fh, indent=2)
-    with open(os.path.join(output_dir, JOB_LOG), "w") as log:
-        proc = subprocess.Popen(
-            [sys.executable, str(RUNNER), spec_path],
-            stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-            start_new_session=True)
-    write_job(output_dir, {
-        "status": "running", "stage": "starting", "pid": proc.pid,
-        "started": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "pathogen": spec["pathogen"], "assembly_id": spec["assembly_id"],
-        "extract_dir": spec["extract_dir"],
-    })
-    return proc.pid
+    if run_id and runs.read_run(run_id) is None:
+        raise RuntimeError(f"unknown run id: {run_id}")
+    if run_id and not runs.acquire_lock(run_id):
+        raise RuntimeError(f"could not acquire the run lock for {run_id}")
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        spec = dict(spec, output_dir=output_dir, run_id=run_id,
+                    extract_dir=extract_dir(output_dir, spec["pathogen"]))
+        spec_path = os.path.join(output_dir, SPEC_FILE)
+        with open(spec_path, "w") as fh:
+            json.dump(spec, fh, indent=2)
+        with open(os.path.join(output_dir, JOB_LOG), "w") as log:
+            proc = subprocess.Popen(
+                [sys.executable, str(RUNNER), spec_path],
+                stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                start_new_session=True)
+        write_job(output_dir, {
+            "status": "running", "stage": "starting", "pid": proc.pid,
+            "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "pathogen": spec["pathogen"], "assembly_id": spec["assembly_id"],
+            "extract_dir": spec["extract_dir"], "run_id": run_id,
+        })
+        return proc.pid
+    except Exception:
+        if run_id:
+            runs.release_lock(run_id)
+        raise
