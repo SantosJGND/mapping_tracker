@@ -49,12 +49,15 @@ def extract_dir(output_dir: str, pathogen: str) -> str:
 
 def build_map_cmd(map_script: str, refs_dir: str, samples_dir: str, tsv_path: str,
                   output_dir: str, log_path: str, workers: int, threads: int,
-                  trim: bool = True, prefilter: bool = True, dedup: bool = True) -> List[str]:
+                  trim: bool = True, prefilter: bool = True, dedup: bool = True,
+                  config_path: Optional[str] = None) -> List[str]:
     cmd = [sys.executable, map_script,
            "--refs-dir", refs_dir, "--samples-dir", samples_dir,
            "--output", tsv_path, "--output-dir", output_dir,
            "--log-file", log_path,
            "--workers", str(workers), "--threads", str(threads)]
+    if config_path:
+        cmd += ["--config", config_path]
     if not trim:
         cmd.append("--no-trim")
     if not prefilter:

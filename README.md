@@ -15,23 +15,30 @@ pip install -r requirements.txt     # streamlit 1.67.0, plotly 6.8.0, pandas 2.3
 streamlit run app/app.py            # from the mapping_tracker directory
 ```
 
+### Configuration
+
+Run defaults are read from `config/mapping.json`, or from the path in `MAPPING_CONFIG`. Docker Compose mounts this file read-only; set `CONFIG_FILE=/path/to/mapping.json` to use a different host file. CLI flags override config values, which override environment variables, which override built-in defaults. The app shows the active config path in the Runs tab; restart the app after editing the file.
+
+```json
+{
+  "workers": 1,
+  "threads": 1,
+  "dedup_heap": "1g",
+  "sort_memory": "256M",
+  "filter": true,
+  "prefilter": true,
+  "dedup": true,
+  "trim": true
+}
+```
+
+`workers` and `threads` control parallel mapping processes and total threads. `dedup_heap` sets Picard `-Xmx`; `sort_memory` sets `samtools sort -m` per thread. The boolean keys map to `--no-filter`, `--no-prefilter`, `--no-dedup`, and `--no-trim`.
+
 Tabs: Data, Runs, References, Heatmap, Sample, Pair, Browser, Warnings. The sidebar chooses a run (or manual paths), table source (`auto`/`tsv`/`live`), and auto-refresh.
 
-### Screenshots
+### Data tab
 
 ![Data tab upload form](images/upload.png)
-
-![Main page](images/main_page.png)
-
-![Heatmap tab](images/heatmap.png)
-
-![Sample tab](images/sample.png)
-
-![Browser tab](images/browser.png)
-
-The Heatmap, Sample, Pair, Browser, and Warnings tabs are read-only. The Data tab uploads files, and the Runs tab starts pipeline work and writes results into the selected run's output directory.
-
-### Data tab
 
 Upload reference genomes as ZIP files and reads as individual FASTQ files. ZIPs may contain flat FASTA files (`*.fa`, `*.fasta`, `*.fna`) or an NCBI dataset (`ncbi_dataset/data/<assembly>/...`). Unsafe paths and symlinks in ZIPs are rejected. Plain FASTQ files (`.fastq`, `.fq`) are gzipped to `*.fastq.gz`; already-gzipped reads are kept. The upload limit is 5 GB per file (`.streamlit/config.toml`).
 
@@ -69,6 +76,8 @@ The Runs tab starts one detached job that:
 
 ### Browser tab (extract_remap output)
 
+![Browser tab](images/browser.png)
+
 The Browser tab shows the excised subset reference from [`extract_remap`](../mapped_reference_extract/README.md) with the samples' remapped BAMs, in **subset coordinates**.
 
 - **Input:** the extract output directories found under `data/runs/<run_id>/output/extract/*/` for the selected run (chosen in a dropdown), or any `extract_remap` output directory typed in the override field. Each needs `subset_ref.fa.fai`, `coverage_intervals.bed`, and `<sample>/remapped.sorted.bam` (+ `.bai`).
@@ -91,7 +100,7 @@ mkdir -p data
 docker compose up --build
 ```
 
-Compose mounts one writable directory: `./data` → `/app/mapping_tracker/data`. Uploaded runs are stored under `data/runs/`, and temporary files under `data/tmp/`. Override the host directory with `DATA_DIR`.
+Compose mounts one writable directory, `./data` → `/app/mapping_tracker/data`, and one read-only config file, `./config/mapping.json` → `/app/mapping_tracker/config/mapping.json`. Uploaded runs are stored under `data/runs/`, and temporary files under `data/tmp/`. Override the host directory with `DATA_DIR` and the config file with `CONFIG_FILE`.
 
 Plain `docker build -t mapping-tracker:local .` also works from this directory; mount `/app/mapping_tracker/data` yourself when running without Compose.
 
@@ -123,10 +132,10 @@ References and samples are detected automatically — no layout flags needed.
 
 #### References
 
-| Layout      | Structure                                                         | Pathogen / Assembly                                                                                                                                                                                                                                  |
-| ----------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Nested NCBI | `references/<pathogen>/ncbi_dataset/data/{GCF_,GCA_}*/<file>.fna` | pathogen = dir name, assembly = accession dir. RefSeq (`GCF_`) preferred; GenBank (`GCA_`) used when no `GCF_` exists                                                                                                                           |
-| Flat        | `references/*.fa`, `references/*.fasta` (optionally `*.fa.ref`)   | pathogen = first `_`-token of filename, assembly = full stem                                                                                                                                                                                          |
+| Layout      | Structure                                                         | Pathogen / Assembly                                                                                                   |
+| ----------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Nested NCBI | `references/<pathogen>/ncbi_dataset/data/{GCF_,GCA_}*/<file>.fna` | pathogen = dir name, assembly = accession dir. RefSeq (`GCF_`) preferred; GenBank (`GCA_`) used when no `GCF_` exists |
+| Flat        | `references/*.fa`, `references/*.fasta` (optionally `*.fa.ref`)   | pathogen = first `_`-token of filename, assembly = full stem                                                          |
 
 #### Samples
 
@@ -155,12 +164,13 @@ python map_references.py \
 
 | Flag                    | Default                                         | Description                                                                                                                                                |
 | ----------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--config`              | `config/mapping.json` (`MAPPING_CONFIG`)        | JSON config file for run defaults                                                                                                                          |
 | `--refs-dir`            | `references`                                    | Directory containing reference genomes                                                                                                                     |
 | `--samples-dir`         | `.`                                             | Directory containing sample FASTQs                                                                                                                         |
 | `--output`              | `mapping_statistics.tsv`                        | Output TSV path                                                                                                                                            |
 | `--output-dir`          | `mapping_results`                               | BAM output directory                                                                                                                                       |
-| `--workers`             | `4`                                             | Number of parallel workers                                                                                                                                 |
-| `--threads`             | `os.cpu_count()`                                | Total threads across all workers                                                                                                                           |
+| `--workers`             | config (`4` fallback)                           | Number of parallel workers                                                                                                                                 |
+| `--threads`             | config (`os.cpu_count()` fallback)              | Total threads across all workers                                                                                                                           |
 | `--verbose`, `-v`       | off                                             | Debug logging                                                                                                                                              |
 | `--log-file`            | `mapping_log.txt`                               | Log file path                                                                                                                                              |
 | `--msamtools`           | `msamtools` on `PATH` (`MAPPING_MSAMTOOLS`)     | Path to msamtools binary                                                                                                                                   |
@@ -175,7 +185,8 @@ python map_references.py \
 | `--prefilter-gz`        | off                                             | Write prefiltered FASTQs gzip-compressed                                                                                                                   |
 | `--picard`              | `picard` on `PATH` (`MAPPING_PICARD`)           | Path to picard binary                                                                                                                                      |
 | `--no-dedup`            | off                                             | Disable Picard duplicate removal                                                                                                                           |
-| `--dedup-heap`          | `8g` (`MAPPING_DEDUP_HEAP`)                     | JVM heap for MarkDuplicates (e.g. `4g`)                                                                                                                    |
+| `--dedup-heap`          | config (`8g` / `MAPPING_DEDUP_HEAP` fallback)   | JVM heap for MarkDuplicates (e.g. `4g`)                                                                                                                    |
+| `--sort-memory`         | config (`MAPPING_SORT_MEMORY` fallback)         | Max memory per `samtools sort` thread (e.g. `256M`)                                                                                                        |
 | `--aligner`             | `bwa`                                           | Aligner: `bwa` (`bwa mem`), `minimap2` (`-ax sr`, `--secondary=no`; `-ax map-ont` under `--nanopore`), or a full path to the binary (detected by basename) |
 | `--trimmomatic`         | `trimmomatic` on `PATH` (`MAPPING_TRIMMOMATIC`) | Path to trimmomatic binary                                                                                                                                 |
 | `--no-trim`             | off                                             | Disable Trimmomatic read trimming                                                                                                                          |

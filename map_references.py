@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pandas as pd
 
+import mapping_config
+
 REFS_DIR = "references"
 SAMPLES_DIR = "."
 OUTPUT_FILE = "mapping_statistics.tsv"
@@ -52,8 +54,6 @@ NANOFILT_QUALITY = 7
 NANOFILT_MINLEN = 200
 NANOFILT_HEADCROP = 0
 NANOFILT_TAILCROP = 0
-
-DEDUP_HEAP = os.environ.get("MAPPING_DEDUP_HEAP", "8g")
 
 
 def resolve_aligner(value):
@@ -873,7 +873,7 @@ def nanofilt_sample(sample, config, threads):
 
 def map_sample(sample, ref_info, temp_dir, output_dir, threads, filter_config,
                prefilter_config, dedup_config, aligner=BWA_ID, trim_state="",
-               aligner_bin=None, nanopore=False):
+               aligner_bin=None, nanopore=False, sort_memory=None):
     sample_name = sample["name"]
     pathogen = ref_info["pathogen"]
     assembly_id = ref_info["assembly_id"]
@@ -982,7 +982,10 @@ def map_sample(sample, ref_info, temp_dir, output_dir, threads, filter_config,
                 align_cmd = [bin_path, "mem", "-t", str(threads), "-R", rg,
                              index_base, g_r1]
             part_bam = bam_path + f".part{len(tmp_bams)}"
-            sort_cmd = [SAMTOOLS, "sort", "-@", str(threads), "-o", part_bam]
+            sort_cmd = [SAMTOOLS, "sort", "-@", str(threads)]
+            if sort_memory:
+                sort_cmd += ["-m", sort_memory]
+            sort_cmd += ["-o", part_bam]
             with subprocess.Popen(align_cmd, stdout=subprocess.PIPE,
                                   stderr=subprocess.DEVNULL) as align_proc, \
                     subprocess.Popen(sort_cmd, stdin=align_proc.stdout,
@@ -1075,21 +1078,33 @@ def map_sample(sample, ref_info, temp_dir, output_dir, threads, filter_config,
 def process_sample_ref_combination(args):
     (sample, ref, temp_dir, output_dir, threads,
      filter_config, prefilter_config, dedup_config, aligner,
-     trim_state, aligner_bin, nanopore) = args
+     trim_state, aligner_bin, nanopore, sort_memory) = args
     return map_sample(sample, ref, temp_dir, output_dir, threads, filter_config,
                       prefilter_config, dedup_config, aligner, trim_state,
-                      aligner_bin, nanopore)
+                      aligner_bin, nanopore, sort_memory)
 
 
 def main():
+    config_parser = argparse.ArgumentParser(add_help=False)
+    config_parser.add_argument("--config", default=None,
+                               help="JSON configuration file path")
+    config_args, _ = config_parser.parse_known_args()
+    try:
+        run_config, config_file = mapping_config.load_config(config_args.config)
+    except (OSError, ValueError) as e:
+        raise SystemExit(f"Invalid mapping configuration: {e}")
+
     parser = argparse.ArgumentParser(description="Map samples against reference genomes")
+    parser.add_argument("--config", default=None,
+                        help="JSON configuration file path [default: %(default)s]")
     parser.add_argument("--refs-dir", default=REFS_DIR, help="References directory")
     parser.add_argument("--samples-dir", default=SAMPLES_DIR, help="Samples base directory")
     parser.add_argument("--output", default=OUTPUT_FILE, help="Output TSV file")
     parser.add_argument("--output-dir", default="mapping_results", help="BAM output directory")
-    parser.add_argument("--workers", type=int, default=4, help="Number of parallel workers")
-    parser.add_argument("--threads", type=int, default=max(1, os.cpu_count() or 1),
-                        help="Total threads across all workers")
+    parser.add_argument("--workers", type=int, default=run_config["workers"],
+                        help="Number of parallel workers [default: %(default)s]")
+    parser.add_argument("--threads", type=int, default=run_config["threads"],
+                        help="Total threads across all workers [default: %(default)s]")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--log-file", default=LOG_FILE, help="Log file path")
     parser.add_argument("--msamtools", default=MSAMTOOLS,
@@ -1100,11 +1115,11 @@ def main():
                         help="Minimum sequence identity, 0-1 [default: %(default)s]")
     parser.add_argument("--min-query-aligned", type=float, default=MIN_QUERY_ALIGNED,
                         help="Minimum fraction of the query aligned, 0-1 [default: %(default)s]")
-    parser.add_argument("--no-filter", action="store_true",
+    parser.add_argument("--no-filter", action="store_true", default=None,
                         help="Disable msamtools length/identity filtering")
     parser.add_argument("--prinseq", default=PRINSEQ,
                         help="Path to prinseq++ binary")
-    parser.add_argument("--no-prefilter", action="store_true",
+    parser.add_argument("--no-prefilter", action="store_true", default=None,
                         help="Disable prinseq++ entropy/dust read prefiltering")
     parser.add_argument("--min-entropy", type=float, default=MIN_ENTROPY,
                         help="Minimum sequence entropy for prefilter, 0-1 "
@@ -1116,17 +1131,19 @@ def main():
                         help="Write prefiltered FASTQs gzip-compressed")
     parser.add_argument("--picard", default=PICARD,
                         help="Path to picard binary")
-    parser.add_argument("--no-dedup", action="store_true",
+    parser.add_argument("--no-dedup", action="store_true", default=None,
                         help="Disable Picard MarkDuplicates duplicate removal")
-    parser.add_argument("--dedup-heap", default=DEDUP_HEAP,
+    parser.add_argument("--dedup-heap", default=run_config["dedup_heap"],
                         help="JVM heap for MarkDuplicates, e.g. 4g [default: %(default)s]")
+    parser.add_argument("--sort-memory", default=run_config["sort_memory"],
+                        help="Max memory per samtools sort thread, e.g. 256M")
     parser.add_argument("--aligner", default=BWA_ID,
                         help="Aligner for mapping: 'bwa', 'minimap2', or a full "
                              "path to the aligner binary (detected by basename) "
                              "[default: %(default)s]")
     parser.add_argument("--trimmomatic", default=TRIMMOMATIC,
                         help="Path to trimmomatic binary")
-    parser.add_argument("--no-trim", action="store_true",
+    parser.add_argument("--no-trim", action="store_true", default=None,
                         help="Disable Trimmomatic quality trimming")
     parser.add_argument("--trim-phred", type=int, choices=[33, 64],
                         default=TRIM_PHRED,
@@ -1161,6 +1178,16 @@ def main():
                              "(0 disables) [default: %(default)s]")
     args = parser.parse_args()
 
+    no_filter = run_config["no_filter"] if args.no_filter is None else args.no_filter
+    no_prefilter = (run_config["no_prefilter"] if args.no_prefilter is None
+                    else args.no_prefilter)
+    no_dedup = run_config["no_dedup"] if args.no_dedup is None else args.no_dedup
+    no_trim = run_config["no_trim"] if args.no_trim is None else args.no_trim
+
+    if args.workers < 1:
+        parser.error("--workers must be >= 1")
+    if args.threads < 1:
+        parser.error("--threads must be >= 1")
     if not 0 < args.min_identity <= 1:
         parser.error("--min-identity must be in (0, 1]")
     if not 0 < args.min_query_aligned <= 1:
@@ -1199,7 +1226,7 @@ def main():
         aligner_id, aligner_bin = MINIMAP2_ID, MINIMAP2
 
     filter_config = {
-        "enabled": not args.no_filter,
+        "enabled": not no_filter,
         "msamtools": args.msamtools,
         "min_len": args.min_len,
         "min_identity": args.min_identity,
@@ -1209,7 +1236,7 @@ def main():
     }
 
     prefilter_config = {
-        "enabled": not args.no_prefilter,
+        "enabled": not no_prefilter,
         "prinseq": args.prinseq,
         "min_entropy": args.min_entropy,
         "min_dust": args.min_dust,
@@ -1218,7 +1245,7 @@ def main():
     }
 
     trim_config = {
-        "enabled": not args.no_trim,
+        "enabled": not no_trim,
         "trimmomatic": args.trimmomatic,
         "phred": args.trim_phred,
         "leading": args.trim_leading,
@@ -1242,7 +1269,7 @@ def main():
     }
 
     dedup_config = {
-        "enabled": not args.no_dedup,
+        "enabled": not no_dedup,
         "picard": args.picard,
         "heap": args.dedup_heap,
     }
@@ -1251,11 +1278,13 @@ def main():
 
     logger = setup_logging(args.log_file, args.verbose)
     logger.info("Starting mapping pipeline")
+    logger.info(f"Configuration file: {config_file}")
 
     logger.debug(
         f"Config: refs={args.refs_dir} samples={args.samples_dir} "
         f"workers={args.workers} total_threads={args.threads} "
         f"per_combo_threads={per_combo_threads} aligner={aligner_id} "
+        f"sort_memory={args.sort_memory} "
         f"aligner_bin={aligner_bin} "
         f"trim={trim_config} filter={filter_config} "
         f"prefilter={prefilter_config} dedup={dedup_config} "
@@ -1352,7 +1381,7 @@ def main():
         combinations = [(s, r, temp_dir, args.output_dir, per_combo_threads,
                          filter_config, prefilter_config, dedup_config,
                          aligner_id, s.get("trim_fingerprint", ""), aligner_bin,
-                         args.nanopore)
+                         args.nanopore, args.sort_memory)
                         for s in samples for r in references]
         total_combinations = len(combinations)
 
@@ -1384,7 +1413,7 @@ def main():
                                  per_combo_threads, filter_config,
                                  prefilter_config, dedup_config,
                                  aligner_id, s.get("trim_fingerprint", ""),
-                                 aligner_bin, args.nanopore)
+                                 aligner_bin, args.nanopore, args.sort_memory)
                                 for s in samples for r in references]
 
             if trim_config["enabled"]:
@@ -1408,9 +1437,10 @@ def main():
                 combinations = [(s, r, temp_dir, args.output_dir,
                                  per_combo_threads, filter_config,
                                  prefilter_config, dedup_config,
-                                 aligner_id, s.get("trim_fingerprint", ""), aligner_bin,
-                                 args.nanopore)
-                                for s in samples for r in references]
+                                  aligner_id, s.get("trim_fingerprint", ""), aligner_bin,
+                                  args.nanopore, args.sort_memory)
+                                 for s in samples for r in references]
+
 
             if prefilter_config["enabled"]:
                 logger.info("Prefiltering reads with prinseq++ (entropy/dust)...")
@@ -1433,9 +1463,10 @@ def main():
                 combinations = [(s, r, temp_dir, args.output_dir,
                                  per_combo_threads, filter_config,
                                  prefilter_config, dedup_config,
-                                 aligner_id, s.get("trim_fingerprint", ""), aligner_bin,
-                                 args.nanopore)
-                                for s in samples for r in references]
+                                  aligner_id, s.get("trim_fingerprint", ""), aligner_bin,
+                                  args.nanopore, args.sort_memory)
+                                 for s in samples for r in references]
+
 
             futures = {executor.submit(process_sample_ref_combination, combo): combo
                        for combo in combinations}

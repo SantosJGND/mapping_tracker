@@ -7,7 +7,9 @@ services:
     network_mode: host
     user: "${UID:-1000}:${GID:-1000}"
     environment:
+      MAPPING_CONFIG: /app/mapping_tracker/config/mapping.json
       MAPPING_DEDUP_HEAP: "${MAPPING_DEDUP_HEAP:-8g}"
       TMPDIR: /app/mapping_tracker/data/tmp
     volumes:
       - ${DATA_DIR:-./data}:/app/mapping_tracker/data
+      - ${CONFIG_FILE:-./config/mapping.json}:/app/mapping_tracker/config/mapping.json:ro

@@ -12,7 +12,11 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+APP_DIR = Path(__file__).resolve().parent
+ROOT_DIR = APP_DIR.parent
+for _path in (str(ROOT_DIR), str(APP_DIR)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
 import browser  # noqa: E402
 import depth  # noqa: E402
 import jobs  # noqa: E402
@@ -21,8 +25,10 @@ import runs  # noqa: E402
 import uploads  # noqa: E402
 import views  # noqa: E402
 from map_references import find_references, find_samples  # noqa: E402
+from mapping_config import load_config  # noqa: E402
 
 MAX_UPLOAD_MB = 5120
+RUN_CONFIG, RUN_CONFIG_PATH = load_config()
 
 st.set_page_config(page_title="mapping_tracker", layout="wide")
 
@@ -195,16 +201,22 @@ def _runs_tab():
     choice = st.selectbox("Reference for extract", labels, key="runs_ref")
     ref = refs[labels.index(choice)]
 
+    st.caption(f"Run defaults: `{RUN_CONFIG_PATH}`")
     with st.form("start_form", border=True):
         c1, c2 = st.columns(2)
-        workers = c1.number_input("Workers", min_value=1, max_value=64, value=4,
+        workers = c1.number_input("Workers", min_value=1, max_value=64,
+                                  value=int(RUN_CONFIG["workers"]),
                                   key="runs_workers")
         threads = c2.number_input("Threads", min_value=1, max_value=256,
-                                  value=os.cpu_count() or 4, key="runs_threads")
+                                  value=int(RUN_CONFIG["threads"]),
+                                  key="runs_threads")
         t1, t2, t3 = st.columns(3)
-        trim = t1.checkbox("Trimmomatic trimming", True, key="runs_trim")
-        prefilter = t2.checkbox("prinseq++ prefilter", True, key="runs_prefilter")
-        dedup = t3.checkbox("Picard dedup", True, key="runs_dedup")
+        trim = t1.checkbox("Trimmomatic trimming", not RUN_CONFIG["no_trim"],
+                           key="runs_trim")
+        prefilter = t2.checkbox("prinseq++ prefilter", not RUN_CONFIG["no_prefilter"],
+                                key="runs_prefilter")
+        dedup = t3.checkbox("Picard dedup", not RUN_CONFIG["no_dedup"],
+                            key="runs_dedup")
         start = st.form_submit_button("Start mapping", disabled=bool(active),
                                       icon=":material/play_arrow:")
 
@@ -214,7 +226,8 @@ def _runs_tab():
                 "map_cmd": jobs.build_map_cmd(
                     str(jobs.DEFAULT_MAP_SCRIPT), paths["references"],
                     paths["samples"], paths["tsv"], paths["output"], paths["log"],
-                    int(workers), int(threads), trim, prefilter, dedup),
+                    int(workers), int(threads), trim, prefilter, dedup,
+                    config_path=RUN_CONFIG_PATH),
                 "extract_script": str(jobs.DEFAULT_EXTRACT_SCRIPT),
                 "ref_fasta": ref["fasta_path"],
                 "samples_dir": paths["samples"],

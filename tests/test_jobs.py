@@ -66,13 +66,15 @@ class JobsTestCase(unittest.TestCase):
 class CommandTests(JobsTestCase):
     def test_map_cmd_flags(self):
         cmd = jobs.build_map_cmd("/m.py", "refs", "samples", "t.tsv", "out", "log.txt",
-                                 2, 8, trim=False, prefilter=True, dedup=False)
+                                 2, 8, trim=False, prefilter=True, dedup=False,
+                                 config_path="/config.json")
         self.assertEqual(cmd[1], "/m.py")
         self.assertIn("--no-trim", cmd)
         self.assertNotIn("--no-prefilter", cmd)
         self.assertIn("--no-dedup", cmd)
         self.assertEqual(cmd[cmd.index("--workers") + 1], "2")
         self.assertEqual(cmd[cmd.index("--threads") + 1], "8")
+        self.assertEqual(cmd[cmd.index("--config") + 1], "/config.json")
 
     def test_extract_cmd(self):
         cmd = jobs.build_extract_cmd("/e.py", "/r.fa", "/m.tsv", "/o", 4)
