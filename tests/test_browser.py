@@ -164,6 +164,14 @@ class ConfigTests(unittest.TestCase):
         names = [t["name"] for t in cfg["tracks"]]
         self.assertIn("junction-spanning reads", names)
 
+    def test_browser_height_scales_with_tracks(self):
+        few = browser.build_config("http://x", ["s1"], CONTIG, None, None)
+        many = browser.build_config("http://x", [f"s{i}" for i in range(10)], CONTIG, "/j.bed", "/r.bed")
+        self.assertGreaterEqual(browser.browser_height(few), 640)
+        self.assertGreater(browser.browser_height(many), browser.browser_height(few))
+        html = browser.viewer_html("http://x", many, height=browser.browser_height(many))
+        self.assertIn("min-height:", html)
+
 
 class ServerTests(BrowserFixture):
     @classmethod

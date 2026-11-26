@@ -929,6 +929,11 @@ def map_sample(sample, ref_info, temp_dir, output_dir, threads, filter_config,
                 marker = read_marker(bam_path + ".deduped")
                 result["duplicates_removed"] = (
                     int(marker.get("duplicates_removed")) if marker else 0)
+            try:
+                from app import depth as _depth
+                _depth.ensure_depth_artifact(bam_path)
+            except Exception:
+                pass
             return result
         except subprocess.CalledProcessError as e:
             return {
@@ -1042,6 +1047,11 @@ def map_sample(sample, ref_info, temp_dir, output_dir, threads, filter_config,
                                total_override=primary_total)
         if dedup_config["enabled"]:
             result["duplicates_removed"] = duplicates_removed
+        try:
+            from app import depth as _depth
+            _depth.ensure_depth_artifact(bam_path)
+        except Exception as e:
+            logging.getLogger(__name__).warning("Depth artifact failed for %s: %s", bam_path, e)
         return result
 
     except subprocess.CalledProcessError as e:

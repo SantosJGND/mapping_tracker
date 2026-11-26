@@ -24,6 +24,11 @@ DEFAULT_BINS = 1000
 CACHE_DIR = Path(__file__).resolve().parent / "cache"
 
 
+def depth_artifact_path(bam_path, bins=DEFAULT_BINS):
+    base = bam_path[:-len(".bam")] if str(bam_path).endswith(".bam") else str(bam_path)
+    return f"{base}.depth.bins{bins}.tsv"
+
+
 def contig_lengths(bam_path):
     """Ordered {contig: length} from the BAM header (@SQ lines)."""
     out = subprocess.run([SAMTOOLS, "view", "-H", bam_path],
@@ -44,12 +49,7 @@ def _cache_path(bam_path, bins, cache_dir):
     return Path(cache_dir) / name
 
 
-def binned_depth(bam_path, bins=DEFAULT_BINS, cache_dir=CACHE_DIR):
-    """DataFrame(contig, start, end, mean_depth), 1-based inclusive bin coords."""
-    cache_file = _cache_path(bam_path, bins, cache_dir)
-    if cache_file.exists():
-        return pd.read_csv(cache_file, sep="\t")
-
+def _compute_binned_depth(bam_path, bins=DEFAULT_BINS):
     lengths = contig_lengths(bam_path)
     layout = {}
     sums = {}
@@ -81,8 +81,43 @@ def binned_depth(bam_path, bins=DEFAULT_BINS, cache_dir=CACHE_DIR):
             end = min((i + 1) * width, length)
             rows.append({"contig": contig, "start": start, "end": end,
                          "mean_depth": sums[contig][i] / (end - start + 1)})
-    df = pd.DataFrame(rows, columns=["contig", "start", "end", "mean_depth"])
+    return pd.DataFrame(rows, columns=["contig", "start", "end", "mean_depth"])
 
+
+def ensure_depth_artifact(bam_path, bins=DEFAULT_BINS):
+    """Compute and persist binned depth next to BAM; return artifact path."""
+    artifact = depth_artifact_path(bam_path, bins=bins)
+    if os.path.exists(artifact):
+        return artifact
+    if not os.path.exists(bam_path):
+        return artifact
+    df = _compute_binned_depth(bam_path, bins=bins)
+    Path(artifact).parent.mkdir(parents=True, exist_ok=True)
+    tmp = artifact + ".tmp"
+    df.to_csv(tmp, sep="\t", index=False)
+    os.replace(tmp, artifact)
+    return artifact
+
+
+def load_depth_artifact(bam_path, bins=DEFAULT_BINS):
+    artifact = depth_artifact_path(bam_path, bins=bins)
+    if os.path.exists(artifact):
+        return pd.read_csv(artifact, sep="\t")
+    return None
+
+
+def binned_depth(bam_path, bins=DEFAULT_BINS, cache_dir=CACHE_DIR):
+    """DataFrame(contig, start, end, mean_depth), 1-based inclusive bin coords."""
+    artifact_df = load_depth_artifact(bam_path, bins=bins)
+    if artifact_df is not None:
+        return artifact_df
+    cache_file = _cache_path(bam_path, bins, cache_dir)
+    if cache_file.exists():
+        return pd.read_csv(cache_file, sep="\t")
+    if not os.path.exists(bam_path):
+        raise FileNotFoundError(f"BAM and depth artifact not found for {bam_path}")
+
+    df = _compute_binned_depth(bam_path, bins=bins)
     Path(cache_dir).mkdir(parents=True, exist_ok=True)
     df.to_csv(cache_file, sep="\t", index=False)
     return df

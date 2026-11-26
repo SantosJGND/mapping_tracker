@@ -18,6 +18,7 @@ for _path in (str(ROOT_DIR), str(APP_DIR)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 import browser  # noqa: E402
+import deploy_queue  # noqa: E402
 import depth  # noqa: E402
 import jobs  # noqa: E402
 import loader  # noqa: E402
@@ -155,13 +156,45 @@ def _data_tab():
             st.error(f"Could not inspect uploaded files: {type(e).__name__}: {e}")
 
 
+def _ref_options(refs):
+    labels = [f"{r['pathogen']} / {r['assembly_id']}" for r in refs]
+    return labels, {label: r for label, r in zip(labels, refs)}
+
+
+def _run_deploy_form(run_id, disabled):
+    prefix = f"queue_{run_id}"
+    with st.expander(f"Config: {_run_label(run_id)}", expanded=False):
+        c1, c2 = st.columns(2)
+        workers = c1.number_input("Workers", min_value=1, max_value=64,
+                                  value=int(RUN_CONFIG["workers"]), key=f"{prefix}_workers")
+        threads = c2.number_input("Threads", min_value=1, max_value=256,
+                                  value=int(RUN_CONFIG["threads"]), key=f"{prefix}_threads")
+        t1, t2, t3 = st.columns(3)
+        trim = t1.checkbox("Trimmomatic trimming", not RUN_CONFIG["no_trim"], key=f"{prefix}_trim")
+        prefilter = t2.checkbox("prinseq++ prefilter", not RUN_CONFIG["no_prefilter"],
+                                key=f"{prefix}_prefilter")
+        dedup = t3.checkbox("Picard dedup", not RUN_CONFIG["no_dedup"], key=f"{prefix}_dedup")
+        st.caption(f"Run defaults source: `{RUN_CONFIG_PATH}`. Extract runs for all references.")
+    return {
+        "workers": int(workers),
+        "threads": int(threads),
+        "trim": bool(trim),
+        "prefilter": bool(prefilter),
+        "dedup": bool(dedup),
+    }
+
+
 def _runs_tab():
     st.subheader("Run mapping + extract")
-    st.caption("One job runs at a time across all datasets. Each run writes to its own "
-               "data/runs/<run_id> directory.")
+    st.caption("One job runs at a time across all datasets. Sequential deployment can queue "
+               "multiple runs; each run keeps its own config.")
     active = runs.active_run()
+    queue = deploy_queue.read_queue()
+    queue_active = deploy_queue.queue_active(queue)
     if active:
         st.warning(f"Job running in `{active}`.")
+    if queue_active:
+        st.info(f"Deployment queue running ({queue.get('status')}, {len(queue.get('items', []))} item(s)).")
     records = runs.list_runs()
     if not records:
         st.info("Upload a dataset in the Data tab first.")
@@ -193,63 +226,122 @@ def _runs_tab():
         refs = find_references(paths["references"])
     except ValueError as e:
         st.error(str(e))
-        return
-    if not refs:
-        st.info("No references found in this dataset.")
-        return
-    labels = [f"{r['pathogen']} / {r['assembly_id']}" for r in refs]
-    choice = st.selectbox("Reference for extract", labels, key="runs_ref")
-    ref = refs[labels.index(choice)]
+        refs = []
+    if refs:
+        st.caption(f"Run defaults: `{RUN_CONFIG_PATH}`. Extract runs for all references.")
+        with st.form("start_form", border=True):
+            c1, c2 = st.columns(2)
+            workers = c1.number_input("Workers", min_value=1, max_value=64,
+                                      value=int(RUN_CONFIG["workers"]),
+                                      key="runs_workers")
+            threads = c2.number_input("Threads", min_value=1, max_value=256,
+                                      value=int(RUN_CONFIG["threads"]),
+                                      key="runs_threads")
+            t1, t2, t3 = st.columns(3)
+            trim = t1.checkbox("Trimmomatic trimming", not RUN_CONFIG["no_trim"],
+                               key="runs_trim")
+            prefilter = t2.checkbox("prinseq++ prefilter", not RUN_CONFIG["no_prefilter"],
+                                    key="runs_prefilter")
+            dedup = t3.checkbox("Picard dedup", not RUN_CONFIG["no_dedup"],
+                                key="runs_dedup")
+            start = st.form_submit_button("Start mapping + extract (all refs)",
+                                          disabled=bool(active or queue_active),
+                                          icon=":material/play_arrow:")
 
-    st.caption(f"Run defaults: `{RUN_CONFIG_PATH}`")
-    with st.form("start_form", border=True):
-        c1, c2 = st.columns(2)
-        workers = c1.number_input("Workers", min_value=1, max_value=64,
-                                  value=int(RUN_CONFIG["workers"]),
-                                  key="runs_workers")
-        threads = c2.number_input("Threads", min_value=1, max_value=256,
-                                  value=int(RUN_CONFIG["threads"]),
-                                  key="runs_threads")
-        t1, t2, t3 = st.columns(3)
-        trim = t1.checkbox("Trimmomatic trimming", not RUN_CONFIG["no_trim"],
-                           key="runs_trim")
-        prefilter = t2.checkbox("prinseq++ prefilter", not RUN_CONFIG["no_prefilter"],
-                                key="runs_prefilter")
-        dedup = t3.checkbox("Picard dedup", not RUN_CONFIG["no_dedup"],
-                            key="runs_dedup")
-        start = st.form_submit_button("Start mapping", disabled=bool(active),
-                                      icon=":material/play_arrow:")
+        if start:
+            try:
+                spec = {
+                    "map_cmd": jobs.build_map_cmd(
+                        str(jobs.DEFAULT_MAP_SCRIPT), paths["references"],
+                        paths["samples"], paths["tsv"], paths["output"], paths["log"],
+                        int(workers), int(threads), trim, prefilter, dedup,
+                        config_path=RUN_CONFIG_PATH),
+                    "extract_script": str(jobs.DEFAULT_EXTRACT_SCRIPT),
+                    "refs_dir": paths["references"],
+                    "samples_dir": paths["samples"],
+                    "threads": int(threads),
+                }
+                jobs.start_job(spec, paths["output"], run_id=selected)
+                st.success("Job started. Status updates on refresh.")
+                st.rerun()
+            except RuntimeError as e:
+                st.error(str(e))
 
-    if start:
-        try:
-            spec = {
-                "map_cmd": jobs.build_map_cmd(
-                    str(jobs.DEFAULT_MAP_SCRIPT), paths["references"],
-                    paths["samples"], paths["tsv"], paths["output"], paths["log"],
-                    int(workers), int(threads), trim, prefilter, dedup,
-                    config_path=RUN_CONFIG_PATH),
-                "extract_script": str(jobs.DEFAULT_EXTRACT_SCRIPT),
-                "ref_fasta": ref["fasta_path"],
-                "samples_dir": paths["samples"],
-                "pathogen": ref["pathogen"],
-                "assembly_id": ref["assembly_id"],
-                "threads": int(threads),
-            }
-            jobs.start_job(spec, paths["output"], run_id=selected)
-            st.success("Job started. Status updates on refresh.")
-            st.rerun()
-        except RuntimeError as e:
-            st.error(str(e))
-
-    ext = jobs.extract_dir(paths["output"], ref["pathogen"])
-    registered = jobs.read_registered(ext)
-    st.markdown("**Samples registered for extract:**")
-    if registered:
-        _show_table([{k: r[k] for k in ("name", "r1", "r2", "bam")}
-                     for r in registered],
-                    alt="Samples registered for extract")
+        results = (jobs.read_job(paths["output"]) or {}).get("extract_results") or []
+        if results:
+            st.markdown("**Extract results:**")
+            _show_table(results, alt="Extract results per reference")
+        else:
+            st.caption("No extract results yet.")
     else:
-        st.caption("None yet.")
+        st.info("No references found in this dataset.")
+
+    st.divider()
+    st.subheader("Sequential deployment")
+    st.caption("Select runs to deploy one by one. Each run keeps its own config. "
+               "Queue continues on job failure/cancel. Redeploying uses existing output and resume rules.")
+    deployable = [r["run_id"] for r in records]
+    selected_queue = st.multiselect("Runs to deploy (in selected order)", deployable,
+                                    default=[], key="deploy_queue_select",
+                                    format_func=_run_label)
+    queue_items = []
+    invalid_queue = False
+    for run_id in selected_queue:
+        try:
+            run_refs = find_references(runs.run_paths(run_id)["references"])
+        except ValueError as e:
+            st.error(f"{_run_label(run_id)}: {e}")
+            invalid_queue = True
+            continue
+        if not run_refs:
+            st.error(f"{_run_label(run_id)}: no references found.")
+            invalid_queue = True
+            continue
+        cfg = _run_deploy_form(run_id, disabled=queue_active)
+        queue_items.append({
+            "run_id": run_id,
+            "spec": deploy_queue.build_spec(
+                run_id, cfg["workers"], cfg["threads"],
+                cfg["trim"], cfg["prefilter"], cfg["dedup"], config_path=RUN_CONFIG_PATH),
+        })
+
+    q1, q2 = st.columns(2)
+    if q1.button("Start sequential deployment", disabled=bool(active or queue_active or invalid_queue or not queue_items),
+                 key="deploy_queue_start", icon=":material/playlist_play:"):
+        try:
+            deploy_queue.start_queue(queue_items)
+            st.success("Sequential deployment started. Status updates on refresh.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Could not start queue: {type(e).__name__}: {e}")
+    if q2.button("Cancel queue (after current job)", disabled=not queue_active,
+                 key="deploy_queue_cancel", icon=":material/stop:"):
+        if deploy_queue.request_cancel():
+            st.warning("Queue cancel requested. Current job will finish unless you cancel it.")
+            st.rerun()
+
+    if queue:
+        st.markdown("**Queue status:**")
+        qmeta = {k: queue.get(k) for k in ("status", "current_index", "current_run_id", "started", "finished", "cancel_requested")}
+        st.code("\n".join(f"{k}: {v}" for k, v in qmeta.items()), language="text")
+        items = queue.get("items", [])
+        if items:
+            rows = []
+            for i, it in enumerate(items, 1):
+                spec = it.get("spec", {})
+                rows.append({
+                    "order": i,
+                    "run": _run_label(it.get("run_id", "")),
+                    "extract": "all references",
+                    "status": it.get("status", ""),
+                    "job_status": it.get("job_status", ""),
+                    "error": it.get("error", ""),
+                })
+            _show_table(rows, alt="Sequential deployment queue")
+        qtail = deploy_queue.queue_log_tail()
+        if qtail:
+            with st.expander("Queue log"):
+                st.code(qtail, language="text")
 
 
 @st.cache_resource(show_spinner=False)
@@ -285,12 +377,19 @@ def _browser_view(outdir, picked, base, signature):
         flags_error = e.stderr or str(e)
     config = browser.build_config(base, list(picked), contigs[0],
                                   junction_path, flags_path)
-    return browser.viewer_html(base, config), flags_error
+    height = browser.browser_height(config)
+    return browser.viewer_html(base, config, height=height), flags_error, height
 
 
 def _extract_outputs(output_dir):
-    found = glob.glob(os.path.join(output_dir, jobs.EXTRACT_DIR, "*", "subset_ref.fa.fai"))
-    return sorted(os.path.dirname(p) for p in found)
+    patterns = [
+        os.path.join(output_dir, jobs.EXTRACT_DIR, "*", "subset_ref.fa.fai"),
+        os.path.join(output_dir, jobs.EXTRACT_DIR, "*", "*", "subset_ref.fa.fai"),
+    ]
+    found = []
+    for pat in patterns:
+        found.extend(glob.glob(pat))
+    return sorted({os.path.dirname(p) for p in found})
 
 
 def _browser_tab(output_dir):
@@ -325,11 +424,11 @@ def _browser_tab(output_dir):
     intervals = browser.read_intervals(outdir)
     contigs = browser.read_contigs(outdir)
     picked = tuple(picked)
-    html, flags_error = _browser_view(outdir, picked, base,
-                                      _browser_signature(outdir, picked))
+    html, flags_error, height = _browser_view(outdir, picked, base,
+                                               _browser_signature(outdir, picked))
     if flags_error:
         st.error(f"Junction read scan failed: {flags_error}")
-    st.iframe(html, height=640, alt="Genome browser for excised reference and selected samples")
+    st.iframe(html, height=height, width="stretch", alt="Genome browser for excised reference and selected samples")
     st.caption("Coordinates are subset coordinates (subset_ref.fa). "
                "Red track: junctions between joined intervals. "
                "Orange track: reads whose alignment spans a junction.")
@@ -450,17 +549,16 @@ def render():
 
                 if st.checkbox("Show per-position coverage (binned, cached)",
                                key="pair_depth"):
-                    if not row["bam_exists"]:
-                        st.warning("BAM not found; per-position coverage unavailable.")
-                    else:
-                        try:
-                            with st.spinner("Computing binned depth..."):
-                                binned = depth.binned_depth(bam, depth.DEFAULT_BINS)
-                            st.plotly_chart(views.depth_figure(
-                                binned, f"{sample} vs {choice}"),
-                                alt=f"Binned coverage for {sample} versus {choice}")
-                        except Exception as e:
-                            st.error(f"Depth computation failed: {e}")
+                    try:
+                        with st.spinner("Loading binned depth..."):
+                            binned = depth.binned_depth(bam, depth.DEFAULT_BINS)
+                        st.plotly_chart(views.depth_figure(
+                            binned, f"{sample} vs {choice}"),
+                            alt=f"Binned coverage for {sample} versus {choice}")
+                    except FileNotFoundError:
+                        st.warning("BAM and depth artifact not found for this pair.")
+                    except Exception as e:
+                        st.error(f"Depth computation failed: {e}")
 
     if browser_tab.open:
         with browser_tab:
@@ -472,7 +570,7 @@ def render():
             if missing.empty:
                 st.success("All BAM paths exist.")
             else:
-                st.warning(f"{len(missing)} row(s) reference a missing BAM.")
+                st.warning(f"{len(missing)} row(s) have no BAM on disk (cleaned up or missing). Depth remains available when a depth artifact exists.")
                 _show_table(missing[["sample", "pathogen", "assembly_id", "bam_path"]],
                             alt="Rows with missing BAM files")
             errored = df[df["error"].fillna("") != ""]

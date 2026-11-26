@@ -135,22 +135,25 @@ def combo_paths(output_dir, pathogen, sample, assembly_id):
         "stats": str(base) + ".stats.txt",
         "aligner": str(base) + ".bam.aligner",
         "deduped": str(base) + ".bam.deduped",
+        "depth": str(base) + ".depth.bins1000.tsv",
     }
 
 
 def _is_complete(paths):
     bam, stats = paths["bam"], paths["stats"]
-    if not (os.path.exists(bam) and os.path.exists(bam + ".bai")
-            and os.path.exists(stats)):
+    if not os.path.exists(stats):
         return False
-    if os.path.getmtime(stats) < os.path.getmtime(bam):
-        return False  # BAM rewritten after the last stats: combo is being re-mapped
     marker = read_marker(paths["aligner"]) or {}
     try:
         int(marker["total_reads"])
     except (KeyError, ValueError):
         return False
-    return True
+    if os.path.exists(bam) and os.path.exists(bam + ".bai"):
+        if os.path.getmtime(stats) < os.path.getmtime(bam):
+            return False  # BAM rewritten after the last stats: combo is being re-mapped
+        return True
+    # BAM cleaned up: allow reporting from stats/markers when depth artifact exists.
+    return os.path.exists(paths.get("depth", ""))
 
 
 def discover_combinations(output_dir, references):
@@ -164,9 +167,40 @@ def discover_combinations(output_dir, references):
             yield stats.name[:-len(suffix)], ref
 
 
+def _depth_summary_from_artifact(path):
+    try:
+        df = pd.read_csv(path, sep="\t")
+    except Exception:
+        return None, None, None
+    if df.empty or not {"start", "end", "mean_depth"}.issubset(df.columns):
+        return None, None, None
+    total_len = 0.0
+    covered_len = 0.0
+    weighted_depth = 0.0
+    for _, r in df.iterrows():
+        try:
+            length = float(r["end"]) - float(r["start"]) + 1.0
+            depth = float(r["mean_depth"])
+        except Exception:
+            continue
+        if length <= 0:
+            continue
+        total_len += length
+        weighted_depth += depth * length
+        if depth > 0:
+            covered_len += length
+    if total_len <= 0:
+        return None, None, None
+    coverage = covered_len / total_len * 100
+    avg_depth = weighted_depth / total_len
+    depth_covered = weighted_depth / covered_len if covered_len > 0 else 0.0
+    return coverage, avg_depth, depth_covered
+
+
 def _summarize_combo(output_dir, ref, sample):
     paths = combo_paths(output_dir, ref["pathogen"], sample, ref["assembly_id"])
     bam = paths["bam"]
+    stats_path = paths["stats"]
     marker = read_marker(paths["aligner"]) or {}
     total_reads = int(marker["total_reads"])
     row = {
@@ -191,21 +225,26 @@ def _summarize_combo(output_dir, ref, sample):
         row["duplicates_removed"] = int(deduped.get("duplicates_removed", 0))
     except ValueError:
         pass
-    try:
-        flagstat = subprocess.run([SAMTOOLS, "flagstat", bam], capture_output=True,
-                                  text=True, check=True).stdout
-        coverage_out = subprocess.run([SAMTOOLS, "coverage", bam],
-                                      capture_output=True, text=True,
-                                      check=True).stdout
-    except (subprocess.CalledProcessError, OSError) as e:
-        row["error"] = f"live summary failed: {e}"
-        return row
-    _, mapped = parse_flagstat(flagstat)
+    if os.path.exists(bam) and os.path.exists(bam + ".bai"):
+        try:
+            flagstat = subprocess.run([SAMTOOLS, "flagstat", bam], capture_output=True,
+                                      text=True, check=True).stdout
+            coverage_out = subprocess.run([SAMTOOLS, "coverage", bam],
+                                          capture_output=True, text=True,
+                                          check=True).stdout
+        except (subprocess.CalledProcessError, OSError) as e:
+            row["error"] = f"live summary failed: {e}"
+            return row
+        _, mapped = parse_flagstat(flagstat)
+        row["coverage"], row["avg_depth"], row["depth_covered"] = _coverage_summary(coverage_out)
+    else:
+        sn = parse_stats_sn(stats_path) if os.path.exists(stats_path) else {}
+        mapped = int(sn.get("reads mapped", 0))
+        row["coverage"], row["avg_depth"], row["depth_covered"] = _depth_summary_from_artifact(paths.get("depth", ""))
+        row["bam_path"] = ""  # cleaned up
     row["mapped_reads"] = mapped
     row["unmapped_reads"] = total_reads - mapped
     row["mapped_pct"] = (mapped / total_reads * 100) if total_reads > 0 else 0
-    row["coverage"], row["avg_depth"], row["depth_covered"] = _coverage_summary(
-        coverage_out)
     return row
 
 

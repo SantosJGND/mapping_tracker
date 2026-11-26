@@ -8,6 +8,8 @@ Use the standalone Streamlit app to upload reference genomes and FASTQ reads, ru
 
 `app/app.py` uploads data, runs `map_references.py` internally, tracks runs, and reads the results. It reads `mapping_statistics.tsv` or builds the table live from completed combinations while a run is in progress.
 
+![Main page](images/main_page.png)
+
 ### Install and run
 
 ```bash
@@ -73,6 +75,17 @@ The Runs tab starts one detached job that:
 - The mapping run writes its TSV and log inside the run's `output/` directory, so the other tabs follow the selected run.
 - Only samples with a mapped BAM for the chosen reference are registered; if none has a BAM, the job fails at the registration stage.
 - Sample names: unpaired `sample.fastq.gz` is named `sample`, so its BAM is `sample_<assembly>.bam`.
+
+### Sequential deployment
+
+The Runs tab can queue multiple runs for sequential deployment. Each queued run keeps its own deployment snapshot (extract reference, workers, threads, trim/prefilter/dedup, config path). The queue runner is detached and starts the next run only after the previous job is terminal and the global lock is released.
+
+- **Eligible runs:** any run can be selected for re-deployment, including `ready`, `done`, `failed`, `cancelled`, and `invalid`.
+- **Continue on failure/cancel:** if a job fails or is cancelled, the queue records the item outcome and continues with remaining runs.
+- **Cancel controls:** *Cancel job* cancels the current run's job; the queue continues. *Cancel queue (after current job)* stops before starting the next queued run and marks remaining pending items as skipped.
+- **State:** queue state is stored in `data/runs/deploy_queue.json` and logs in `data/runs/deploy_queue.log`.
+- **Resume/redeploy:** re-deploying into an existing output directory follows normal resume rules; changing aligner/trim/prefilter/dedup/filter settings may require a fresh output directory.
+- **Storage cleanup:** after a successful extract stage, full-reference BAM/BAI/metrics intermediates are removed to save space. Compact `*.depth.bins1000.tsv` artifacts and `.stats.txt`/marker files are kept so Pair-tab binned depth and reporting remain available; redeploy/remap starts from scratch when BAMs were cleaned.
 
 ### Browser tab (extract_remap output)
 

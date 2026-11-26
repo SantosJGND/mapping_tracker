@@ -18,6 +18,7 @@ APP = Path(__file__).resolve().parent.parent / "app"
 sys.path.insert(0, str(APP))
 import jobs  # noqa: E402
 import runs  # noqa: E402
+from app import depth  # noqa: E402
 
 RUNNER = APP / "pipeline_runner.py"
 
@@ -29,7 +30,12 @@ if os.environ.get('STUB_MAP_FAIL'):
 for sample in ('s1',):
     d = os.path.join(out, 'PathoA')
     os.makedirs(d, exist_ok=True)
-    open(os.path.join(d, sample + '_GCF_1.bam'), 'w').write('bam')
+    bam = os.path.join(d, sample + '_GCF_1.bam')
+    open(bam, 'w').write('bam')
+    open(bam + '.bai', 'w').write('bai')
+    open(os.path.join(d, sample + '_GCF_1.stats.txt'), 'w').write('stats')
+    open(bam + '.aligner', 'w').write('aligner=bwa\\ntotal_reads=1\\n')
+    open(os.path.join(d, sample + '_GCF_1.depth.bins1000.tsv'), 'w').write('contig\\tstart\\tend\\tmean_depth\\nC\\t1\\t10\\t1.0\\n')
 """
 
 STUB_EXTRACT = """import os, sys
@@ -82,8 +88,8 @@ class CommandTests(JobsTestCase):
                                    "--outdir", "/o", "--threads", "4"])
 
     def test_extract_dir_layout(self):
-        self.assertEqual(jobs.extract_dir("/out", "PathoA"),
-                         os.path.join("/out", "extract", "PathoA"))
+        self.assertEqual(jobs.extract_dir("/out", "PathoA", "GCF_1"),
+                         os.path.join("/out", "extract", "PathoA__GCF_1"))
 
 
 class RegistrationTests(JobsTestCase):
@@ -91,7 +97,7 @@ class RegistrationTests(JobsTestCase):
         # s1 has a mapped BAM for GCF_1; s2 does not
         os.makedirs(os.path.join(self.out, "PathoA"))
         Path(self.out, "PathoA", "s1_GCF_1.bam").write_text("bam")
-        ext = jobs.extract_dir(self.out, "PathoA")
+        ext = jobs.extract_dir(self.out, "PathoA", "GCF_1")
         manifest, rows = jobs.build_manifest(self.samples, self.out, "PathoA", "GCF_1", ext)
         self.assertEqual([r["name"] for r in rows], ["s1"])
         self.assertEqual(rows[0]["r2"], os.path.abspath(os.path.join(self.samples, "s1_2P.fastq.gz")))
@@ -99,17 +105,18 @@ class RegistrationTests(JobsTestCase):
         self.assertEqual([r["name"] for r in registered], ["s1"])
         self.assertTrue(os.path.isabs(registered[0]["bam"]))
 
-    def test_no_bam_raises(self):
-        with self.assertRaises(ValueError):
-            jobs.build_manifest(self.samples, self.out, "PathoA", "GCF_1",
-                                jobs.extract_dir(self.out, "PathoA"))
+    def test_no_bam_returns_empty(self):
+        manifest, rows = jobs.build_manifest(self.samples, self.out, "PathoA", "GCF_1",
+                                             jobs.extract_dir(self.out, "PathoA", "GCF_1"))
+        self.assertEqual(rows, [])
+        self.assertTrue(os.path.isfile(manifest))
 
     def test_single_end_uses_dash(self):
         Path(self.samples, "se_only.fastq.gz").write_text("x")
         os.makedirs(os.path.join(self.out, "PathoA"))
         Path(self.out, "PathoA", "se_only_GCF_1.bam").write_text("bam")
         _, rows = jobs.build_manifest(self.samples, self.out, "PathoA", "GCF_1",
-                                      jobs.extract_dir(self.out, "PathoA"))
+                                      jobs.extract_dir(self.out, "PathoA", "GCF_1"))
         self.assertEqual(rows[0]["name"], "se_only")
         self.assertEqual(rows[0]["r2"], "-")
 
@@ -184,15 +191,15 @@ class RunnerTests(JobsTestCase):
     def _spec(self, map_script, extract_script, **extra):
         log = os.path.join(self.tmp, "calls.log")
         os.environ["STUB_LOG"] = log
+        refs_dir = os.path.join(self.tmp, "refs")
+        os.makedirs(os.path.join(refs_dir, "PathoA", "ncbi_dataset", "data", "GCF_1"), exist_ok=True)
+        Path(refs_dir, "PathoA", "ncbi_dataset", "data", "GCF_1", "genomic.fna").write_text(">r\nACGT\n")
         spec = {
             "output_dir": self.out,
             "map_cmd": [sys.executable, map_script, "--output-dir", self.out],
             "extract_script": extract_script,
-            "ref_fasta": "/ref.fa",
+            "refs_dir": refs_dir,
             "samples_dir": self.samples,
-            "pathogen": "PathoA",
-            "assembly_id": "GCF_1",
-            "extract_dir": jobs.extract_dir(self.out, "PathoA"),
             "threads": 2,
         }
         spec.update(extra)
@@ -215,12 +222,14 @@ class RunnerTests(JobsTestCase):
         self.assertEqual(rc, 0)
         job = jobs.read_job(self.out)
         self.assertEqual(job["status"], "done")
-        self.assertEqual(job["samples"], ["s1"])
+        self.assertEqual(len(job.get("extract_results", [])), 1)
+        self.assertEqual(job["extract_results"][0]["status"], "done")
+        self.assertEqual(job["extract_results"][0]["samples"], ["s1"])
         calls = Path(log).read_text().splitlines()
         self.assertTrue(calls[0].startswith("map "))
         self.assertTrue(calls[1].startswith("extract "))
         self.assertIn("--manifest", calls[1])
-        registered = jobs.read_registered(jobs.extract_dir(self.out, "PathoA"))
+        registered = jobs.read_registered(jobs.extract_dir(self.out, "PathoA", "GCF_1"))
         self.assertEqual([r["name"] for r in registered], ["s1"])
 
     def test_success_releases_run_lock_and_updates_run(self):
@@ -248,6 +257,24 @@ class RunnerTests(JobsTestCase):
         self.assertEqual((job["status"], job["stage"]), ("failed", "mapping"))
         calls = Path(log).read_text().splitlines()
         self.assertFalse(any(c.startswith("extract") for c in calls))
+
+    def test_cleanup_removes_full_ref_bam_keeps_artifacts(self):
+        pdir = Path(self.out) / "PathoA"
+        pdir.mkdir(parents=True, exist_ok=True)
+        bam = pdir / "s1_GCF_1.bam"
+        bam.write_text("bam")
+        Path(str(bam) + ".bai").write_text("bai")
+        Path(str(bam) + ".dedup.metrics.txt").write_text("m")
+        (pdir / "s1_GCF_1.stats.txt").write_text("stats")
+        (pdir / "s1_GCF_1.bam.aligner").write_text("aligner=bwa\ntotal_reads=1\n")
+        (pdir / "s1_GCF_1.depth.bins1000.tsv").write_text("contig\tstart\tend\tmean_depth\nC\t1\t10\t1.0\n")
+        removed = jobs.cleanup_full_ref_bams(self.out)
+        self.assertFalse(bam.exists())
+        self.assertFalse(Path(str(bam) + ".bai").exists())
+        self.assertTrue((pdir / "s1_GCF_1.stats.txt").exists())
+        self.assertTrue((pdir / "s1_GCF_1.bam.aligner").exists())
+        self.assertTrue((pdir / "s1_GCF_1.depth.bins1000.tsv").exists())
+        self.assertTrue(removed)
 
 
 if __name__ == "__main__":

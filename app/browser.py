@@ -252,9 +252,16 @@ def _script_json(obj) -> str:
             .replace(">", "\\u003e").replace("&", "\\u0026"))
 
 
-def viewer_html(base_url: str, config: dict) -> str:
+def browser_height(config: dict, min_height: int = 900, per_track: int = 140, base: int = 260) -> int:
+    tracks = len(config.get("tracks", [])) if isinstance(config, dict) else 0
+    return max(min_height, base + per_track * max(1, tracks))
+
+
+def viewer_html(base_url: str, config: dict, height: int = 900) -> str:
     return (
-        '<div id="igv" style="width:100%;background-color:#fff"></div>\n'
+        "<style>html,body{margin:0;padding:0;background:#fff;width:100%;}"
+        f"#igv{{width:100%;min-height:{height}px;height:{height}px;}}</style>\n"
+        f'<div id="igv"></div>\n'
         f'<script src="{base_url}/static/igv.min.js"></script>\n'
         "<script>\n"
         f"igv.createBrowser(document.getElementById('igv'), {_script_json(config)})\n"
@@ -312,8 +319,17 @@ class _RangeHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         size = target.stat().st_size
-        start, end, status = 0, size - 1, 200
+        ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
         header = self.headers.get("Range")
+        if size == 0:
+            self.send_response(200)
+            self._cors()
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        start, end, status = 0, size - 1, 200
         if header:
             m = _RANGE_RE.match(header.strip())
             if not m or (m.group(1) == "" and m.group(2) == ""):
@@ -336,7 +352,6 @@ class _RangeHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self._cors()
         self.send_header("Accept-Ranges", "bytes")
-        ctype = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(length))
         if status == 206:

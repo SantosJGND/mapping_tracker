@@ -1,12 +1,11 @@
 """Launch and track map_references.py -> extract_remap.py runs from the Streamlit app.
 
-A job is one mapping run followed by one extract run for a chosen reference:
+A job is one mapping run followed by extract runs for all references in the run:
 1. map_references.py maps every sample against every reference (output: <output-dir>).
-2. The samples with a mapped BAM for the chosen reference are registered in
-   <output-dir>/extract/<pathogen>/manifest.tsv (this file is the record of which
-   samples went into the extract).
+2. For each reference, samples with a mapped BAM are registered in
+   <output-dir>/extract/<pathogen>__<assembly_id>/manifest.tsv.
 3. extract_remap.py builds the excised reference and remaps those samples into
-   <output-dir>/extract/<pathogen>/, which the Browser tab reads.
+   <output-dir>/extract/<pathogen>__<assembly_id>/, which the Browser tab reads.
 
 The job runs as a detached process (pipeline_runner.py), so it survives Streamlit
 reruns. Its state is kept in <output-dir>/job.json; only one job runs per output dir.
@@ -43,8 +42,10 @@ MANIFEST = "manifest.tsv"
 
 # ------------------------------------------------------------------ commands
 
-def extract_dir(output_dir: str, pathogen: str) -> str:
-    return os.path.join(output_dir, EXTRACT_DIR, pathogen)
+def extract_dir(output_dir: str, pathogen: str, assembly_id: str) -> str:
+    safe_pathogen = str(pathogen).replace(os.sep, "_")
+    safe_assembly = str(assembly_id).replace(os.sep, "_")
+    return os.path.join(output_dir, EXTRACT_DIR, f"{safe_pathogen}__{safe_assembly}")
 
 
 def build_map_cmd(map_script: str, refs_dir: str, samples_dir: str, tsv_path: str,
@@ -82,11 +83,11 @@ def mapped_bam(output_dir: str, pathogen: str, sample: str, assembly_id: str) ->
 
 def build_manifest(samples_dir: str, output_dir: str, pathogen: str, assembly_id: str,
                    out_dir: str) -> Tuple[str, List[Dict[str, str]]]:
-    """Register the samples with a mapped BAM for this reference as an extract manifest.
+    """Register samples with a mapped BAM for this reference as an extract manifest.
 
     Writes <out_dir>/manifest.tsv (name, r1, r2, bam; '-' = no R2) and returns
     (manifest path, rows). Samples without a mapped BAM are not registered.
-    Raises ValueError when no sample has a BAM.
+    Returns (manifest, []) when no sample has a BAM.
     """
     rows = []
     for s in find_samples(samples_dir):
@@ -99,8 +100,6 @@ def build_manifest(samples_dir: str, output_dir: str, pathogen: str, assembly_id
             "r2": os.path.abspath(s["r2"]) if s["r2"] else "-",
             "bam": os.path.abspath(bam),
         })
-    if not rows:
-        raise ValueError(f"no mapped BAM for {pathogen}/{assembly_id} in {output_dir}")
     os.makedirs(out_dir, exist_ok=True)
     manifest = os.path.join(out_dir, MANIFEST)
     with open(manifest, "w") as fh:
@@ -119,6 +118,48 @@ def read_registered(out_dir: str) -> List[Dict[str, str]]:
         header = fh.readline().rstrip("\n").split("\t")
         return [dict(zip(header, line.rstrip("\n").split("\t")))
                 for line in fh if line.strip()]
+
+
+def _cleanup_bam_if_ready(bam: Path) -> List[str]:
+    name = bam.name
+    if name.endswith(".part") or "/extract/" in str(bam).replace("\\", "/"):
+        return []
+    stats = bam.with_suffix(".stats.txt")
+    aligner = Path(str(bam) + ".aligner")
+    depth_artifact = Path(str(bam)[:-4] + ".depth.bins1000.tsv")
+    if not stats.exists() or not aligner.exists() or not depth_artifact.exists():
+        return []
+    removed = []
+    for p in [bam, Path(str(bam) + ".bai"), Path(str(bam) + ".dedup.metrics.txt")]:
+        try:
+            if p.exists() or p.is_symlink():
+                p.unlink()
+                removed.append(str(p))
+        except OSError:
+            pass
+    return removed
+
+
+def cleanup_full_ref_bams(output_dir: str) -> List[str]:
+    """Remove full-reference BAM intermediates after successful extract.
+
+    Keeps stats/marker files for reporting and a compact binned depth artifact
+    for Pair-tab depth plots. Redeploy remaps from scratch by design.
+    """
+    removed = []
+    for bam in Path(output_dir).glob("*/*_*.bam"):
+        removed.extend(_cleanup_bam_if_ready(bam))
+    return removed
+
+
+def cleanup_full_ref_bam(output_dir: str, pathogen: str, assembly_id: str) -> List[str]:
+    bam = Path(mapped_bam(output_dir, pathogen, "*", assembly_id))
+    # mapped_bam expects sample name; use glob for this reference.
+    pattern = Path(output_dir) / pathogen / f"*_{assembly_id}.bam"
+    removed = []
+    for p in pattern.parent.glob(pattern.name):
+        removed.extend(_cleanup_bam_if_ready(p))
+    return removed
 
 
 # ------------------------------------------------------------------- job state
@@ -145,7 +186,7 @@ def write_job(output_dir: str, data: dict) -> None:
     if run_id:
         keys = ("status", "stage", "pid", "started", "finished", "pathogen",
                 "assembly_id", "extract_dir", "samples", "manifest", "returncode",
-                "error")
+                "error", "extract_results")
         fields = {key: data[key] for key in keys if key in data}
         runs.update_run(run_id, **fields)
 
@@ -212,8 +253,8 @@ def cancel_job(output_dir: str) -> bool:
 def start_job(spec: dict, output_dir: str, run_id: Optional[str] = None) -> int:
     """Start a detached pipeline job. Returns the runner pid.
 
-    spec keys: map_cmd, extract_script, ref_fasta, samples_dir, pathogen,
-    assembly_id, threads. Raises RuntimeError when a job is already running.
+    spec keys: map_cmd, extract_script, samples_dir, refs_dir, threads.
+    Raises RuntimeError when a job is already running.
     """
     output_dir = os.path.abspath(output_dir)
     active = runs.active_run()
@@ -227,8 +268,7 @@ def start_job(spec: dict, output_dir: str, run_id: Optional[str] = None) -> int:
         raise RuntimeError(f"could not acquire the run lock for {run_id}")
     try:
         os.makedirs(output_dir, exist_ok=True)
-        spec = dict(spec, output_dir=output_dir, run_id=run_id,
-                    extract_dir=extract_dir(output_dir, spec["pathogen"]))
+        spec = dict(spec, output_dir=output_dir, run_id=run_id)
         spec_path = os.path.join(output_dir, SPEC_FILE)
         with open(spec_path, "w") as fh:
             json.dump(spec, fh, indent=2)
@@ -237,12 +277,12 @@ def start_job(spec: dict, output_dir: str, run_id: Optional[str] = None) -> int:
                 [sys.executable, str(RUNNER), spec_path],
                 stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                 start_new_session=True)
-        write_job(output_dir, {
-            "status": "running", "stage": "starting", "pid": proc.pid,
-            "started": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "pathogen": spec["pathogen"], "assembly_id": spec["assembly_id"],
-            "extract_dir": spec["extract_dir"], "run_id": run_id,
-        })
+        job = {
+            "status": "running", "stage": "mapping", "pid": proc.pid,
+            "started": time.strftime("%Y-%m-%d %H:%M:%S"), "finished": None,
+            "run_id": run_id, "extract_results": [],
+        }
+        write_job(output_dir, job)
         return proc.pid
     except Exception:
         if run_id:
